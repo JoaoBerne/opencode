@@ -228,6 +228,29 @@ describe("session.retry.delay", () => {
     }),
   )
 
+  it.instance("policy never retries when maxRetries is zero", () =>
+    Effect.gen(function* () {
+      const attempts: number[] = []
+      const error = apiError({ "retry-after-ms": "0" })
+      const step = yield* Schedule.toStepWithMetadata(
+        SessionRetry.policy({
+          provider: "test",
+          tuning: { maxRetries: 0 },
+          parse: Schema.decodeUnknownSync(SessionV1.APIError.Schema),
+          set: (info) =>
+            Effect.sync(() => {
+              attempts.push(info.attempt)
+            }),
+        }),
+      )
+
+      yield* Effect.forEach(Array.from({ length: 5 }), () => Effect.ignore(step(error)))
+
+      // with side effects in play, a failed request must never be replayed
+      expect(attempts).toStrictEqual([])
+    }),
+  )
+
   it.instance("policy keeps retrying when maxRetries is negative", () =>
     Effect.gen(function* () {
       const attempts: number[] = []
