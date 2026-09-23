@@ -45,16 +45,20 @@ export type Tuning = {
 }
 
 function resolve(tuning?: Tuning) {
+  // Config validation already enforces these rules, but a plugin config hook
+  // mutates the loaded config without revalidation, so they are applied again
+  // here, where every caller reads them. Anything invalid falls back to the
+  // default: a NaN maxRetries would otherwise mean unlimited, and a negative or
+  // NaN maxDelayMs would slip through cap().
+  const pick = (value: number | undefined, fallback: number, valid: (n: number) => boolean) =>
+    value !== undefined && Number.isFinite(value) && valid(value) ? value : fallback
   return {
-    maxRetries: tuning?.maxRetries ?? RETRY_MAX_RETRIES,
-    initialDelayMs: tuning?.initialDelayMs ?? RETRY_INITIAL_DELAY,
-    backoffFactor: tuning?.backoffFactor ?? RETRY_BACKOFF_FACTOR,
-    jitterFactor: tuning?.jitterFactor ?? RETRY_JITTER_FACTOR,
-    // Normalized here so policy() and delay() read the same ceiling. Config
-    // validation also bounds this, but a plugin config hook mutates the loaded
-    // config without revalidation, so it cannot be the only guard.
-    maxDelayMs: Math.min(tuning?.maxDelayMs ?? RETRY_MAX_DELAY, RETRY_MAX_DELAY),
-    maxDelayNoHeadersMs: tuning?.maxDelayNoHeadersMs ?? RETRY_MAX_DELAY_NO_HEADERS,
+    maxRetries: pick(tuning?.maxRetries, RETRY_MAX_RETRIES, (n) => Number.isInteger(n) && n >= -1),
+    initialDelayMs: pick(tuning?.initialDelayMs, RETRY_INITIAL_DELAY, (n) => n > 0),
+    backoffFactor: pick(tuning?.backoffFactor, RETRY_BACKOFF_FACTOR, (n) => n >= 1),
+    jitterFactor: pick(tuning?.jitterFactor, RETRY_JITTER_FACTOR, (n) => n >= 0),
+    maxDelayMs: pick(tuning?.maxDelayMs, RETRY_MAX_DELAY, (n) => n > 0 && n <= RETRY_MAX_DELAY),
+    maxDelayNoHeadersMs: pick(tuning?.maxDelayNoHeadersMs, RETRY_MAX_DELAY_NO_HEADERS, (n) => n > 0),
   }
 }
 

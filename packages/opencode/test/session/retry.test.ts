@@ -198,6 +198,16 @@ describe("session.retry.delay", () => {
     expect(SessionRetry.delay(1, apiError({ "retry-after": "-100" }), 0)).toBe(0)
   })
 
+  test("falls back to defaults for values a plugin slipped past validation", () => {
+    // the plugin config hook mutates the loaded config without revalidating it
+    const error = apiError()
+    expect(SessionRetry.delay(1, error, 0, { maxDelayMs: -1 })).toBe(2000)
+    expect(SessionRetry.delay(1, error, 0, { maxDelayMs: NaN })).toBe(2000)
+    expect(SessionRetry.delay(1, error, 0, { initialDelayMs: -100 })).toBe(2000)
+    expect(SessionRetry.delay(1, error, 0, { backoffFactor: NaN })).toBe(2000)
+    expect(SessionRetry.delay(2, error, 0, { backoffFactor: 0.5 })).toBe(4000)
+  })
+
   test("pins the jitter ceiling for a tuned schedule", () => {
     const error = apiError()
     const tuning = { initialDelayMs: 500, backoffFactor: 1, jitterFactor: 0.2 }
@@ -248,6 +258,28 @@ describe("session.retry.delay", () => {
 
       // with side effects in play, a failed request must never be replayed
       expect(attempts).toStrictEqual([])
+    }),
+  )
+
+  it.instance("policy treats an invalid maxRetries as the default, not as unlimited", () =>
+    Effect.gen(function* () {
+      const attempts: number[] = []
+      const error = apiError({ "retry-after-ms": "0" })
+      const step = yield* Schedule.toStepWithMetadata(
+        SessionRetry.policy({
+          provider: "test",
+          tuning: { maxRetries: NaN },
+          parse: Schema.decodeUnknownSync(SessionV1.APIError.Schema),
+          set: (info) =>
+            Effect.sync(() => {
+              attempts.push(info.attempt)
+            }),
+        }),
+      )
+
+      yield* Effect.forEach(Array.from({ length: 10 }), () => Effect.ignore(step(error)))
+
+      expect(attempts).toStrictEqual([1, 2, 3, 4, 5])
     }),
   )
 
